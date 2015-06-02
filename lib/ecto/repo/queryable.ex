@@ -13,13 +13,24 @@ defmodule Ecto.Repo.Queryable do
   Implementation for `Ecto.Repo.all/2`
   """
   def all(repo, adapter, queryable, opts) when is_list(opts) do
-    {query, params} =
+    {delta_t1, result} = :timer.tc(fn ->
       Queryable.to_query(queryable)
       |> Planner.query([])
+    end)
+    {query, params} = result
+    PS.Metrics.update_value([:api_db, :select, :repo_all_first_half, :run_time_ms], delta_t1 / 1000)
 
-    adapter.all(repo, query, params, opts)
-    |> Ecto.Repo.Assoc.query(query)
-    |> Ecto.Repo.Preloader.query(repo, query, to_select(query.select))
+    {delta_t2, result} = :timer.tc(fn ->
+      adapter.all(repo, query, params, opts)
+      |> Ecto.Repo.Assoc.query(query)
+      |> Ecto.Repo.Preloader.query(repo, query, to_select(query.select))
+    end)
+    PS.Metrics.update_value([:api_db, :select, :repo_all_second_half, :run_time_ms], delta_t2 / 1000)
+    if Keyword.get(opts, :timing, false) do
+      {result, delta_t1, delta_t2}
+    else
+      result
+    end
   end
 
   @doc """
